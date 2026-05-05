@@ -63,16 +63,16 @@ tasks.named<ShadowJar>("shadowJar") {
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21) // Java 21 LTS - best compatibility
+        languageVersion = JavaLanguageVersion.of(22) // Java 21 LTS - best compatibility
     }
 }
 
-application {
-    mainClass.set("competition_entry.RunEntryAsServerKt") // Adjust this if your package structure is different
-}
+// application {
+//    mainClass.set("competition_entry.RunEntryAsServerKt") // Adjust this if your package structure is different
+//}
 
 kotlin {
-    jvmToolchain(21) // Ensure Kotlin targets JVM 21 as well
+    jvmToolchain(22) // Ensure Kotlin targets JVM 21 as well
 }
 
 tasks.register<JavaExec>("runEvaluation") {
@@ -81,6 +81,11 @@ tasks.register<JavaExec>("runEvaluation") {
     args = listOf(project.findProperty("args")?.toString() ?: "49875")
 }
 
+tasks.register<JavaExec>("runMyAgent") {
+    mainClass.set("RunMyAgentKt")
+    classpath = sourceSets["main"].runtimeClasspath
+    standardInput = System.`in`
+}
 tasks.register<JavaExec>("runUnifiedExample") {
     mainClass.set("games.planetwars.runners.UnifiedGameRunnerKt")
     classpath = sourceSets["main"].runtimeClasspath
