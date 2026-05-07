@@ -1,33 +1,39 @@
+"""
+Main agent entry point for the competition.
+
+Wraps the DQN-based RL agent and provides the interface expected by
+the game runner and competition server.
+
+The LLM strategy integration layer (separate team) will call
+set_llm_strategy() on the inner DQN agent periodically.
+"""
+
 from typing import Optional
-from core.game_state import GameState, Action
+
 from agents.planet_wars_agent import PlanetWarsPlayer
-import random
+from core.game_state import GameState, GameParams, Player, Action
+from rl_agent.dqn_agent import DQNAgent
+
 
 class MyPythonAgent(PlanetWarsPlayer):
-    """Мой первый Python-агент для Planet Wars"""
+    """Competition agent: DQN RL with LLM strategy support."""
+
+    def __init__(self, checkpoint_path: Optional[str] = None):
+        super().__init__()
+        self.dqn_agent = DQNAgent(checkpoint_path=checkpoint_path)
+
+    def prepare_to_play_as(
+        self,
+        player: Player,
+        params: GameParams,
+        opponent: Optional[str] = None,
+    ) -> str:
+        super().prepare_to_play_as(player, params, opponent)
+        self.dqn_agent.prepare_to_play_as(player, params, opponent)
+        return self.get_agent_type()
 
     def get_action(self, game_state: GameState) -> Action:
-        # Найти свою планету с кораблями
-        my_planets = [p for p in game_state.planets
-                      if p.owner == self.player and p.n_ships > 1]
-        if not my_planets:
-            return Action.do_nothing()
-
-        # Выбрать любую не свою планету
-        targets = [p for p in game_state.planets
-                   if p.owner != self.player]
-        if not targets:
-            return Action.do_nothing()
-
-        src = random.choice(my_planets)
-        dst = random.choice(targets)
-
-        return Action(
-            playerId=self.player,
-            sourcePlanetId=src.id,
-            destinationPlanetId=dst.id,
-            numShips=int(src.n_ships // 2)
-        )
+        return self.dqn_agent.get_action(game_state)
 
     def get_agent_type(self) -> str:
-        return "My Python Agent v0.1"
+        return "LLM+DQN Hybrid Agent v1.0"

@@ -8,3 +8,8 @@ websockets>=12,<14        # Python agent/server over WS
 pydantic>=2.6,<3.0        # JSON schemas for messages
 python-dotenv>=1.0,<2.0   # load GITHUB_TOKEN, etc. from .env
 
+# ---- RL Agent deps ----
+torch>=2.0,<3.0            # DQN neural network
+numpy>=1.24,<2.0           # feature encoding & math
+tqdm>=4.66.0               # training progress bar
+
