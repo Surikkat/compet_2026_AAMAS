@@ -5,25 +5,32 @@ import random
 import threading
 from typing import Optional, List
 from openai import OpenAI
+from google import genai
 
 from core.game_state import GameState, Action, Player
 from agents.planet_wars_agent import PlanetWarsPlayer
 
 class LLMAgent:
-    def __init__(self, api_key: str = "YOUR_API_KEY", base_url: Optional[str] = None):
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+    def __init__(self, api_key: str, base_url: str):
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=base_url
+        )
 
         # [A, P, E, N] = [Attack, Protect, Expansion, Nothing]
         self.current_strategy = [0.0, 0.0, 0.0, 1.0] # Nothing to do in base strategy
 
         self.last_update_time = 0.0
-        self.update_interval = 2.0 # seconds
+        self.update_interval = 5.0 # seconds
+        self.update_interval = 4.0
         self.running = True
         self.lock = threading.Lock()
 
+        self.prompt_path = "/home/maria/phystech/projects/game_planet_wars/compet_2026_AAMAS/app/src/main/python/prompt_en.md"
+
         # Load prompt template
         try:
-            with open("prompt.md", "r", encoding="utf-8") as f:
+            with open(self.prompt_path, "r", encoding="utf-8") as f:
                 self.prompt_template = f.read()
         except FileNotFoundError:
             print("[Warning] prompt.md not found! Using default template.")
@@ -57,9 +64,9 @@ class LLMAgent:
                 neutral_ships_on_planet += p.n_ships
 
             if p.transporter is not None:
-                if p.owner == player:
+                if p.transporter.owner == player:
                     my_ships_on_flight += p.transporter.n_ships
-                elif p.owner == player.opponent():
+                elif p.transporter.owner == player.opponent():
                     enemy_ships_on_flight += p.transporter.n_ships
             
         my_total_ships = my_ships_on_planet + my_ships_on_flight
@@ -83,10 +90,10 @@ class LLMAgent:
         prompt = self.prompt_template.format(state_summary=state_summary)
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="openai/gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
-                max_tokens=20
+                max_tokens=30,
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -131,12 +138,27 @@ class LLMAgent:
                     self.last_update_time = time.time()
             time.sleep(0.1)
 
-    
+
+
+
+
 '''ObserverAgent -- нужен для тестирования LLM'''
+import os
+from dotenv import load_dotenv
+load_dotenv() 
+
 class ObserverAgent(PlanetWarsPlayer):
     def __init__(self):
         super().__init__()
-        self.llm_agent = LLMAgent(api_key="YOUR_API_KEY") 
+
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError("API ключ OPENROUTER_API_KEY не найден в .env")
+        
+        self.llm_agent = LLMAgent(
+            api_key=api_key, 
+            base_url="https://openrouter.ai/api/v1"
+        ) 
         self.latest_state = None
         
         self.llm_thread = threading.Thread(
@@ -151,6 +173,7 @@ class ObserverAgent(PlanetWarsPlayer):
 
     def get_action(self, game_state: GameState) -> Action:
         self.latest_state = game_state
+        time.sleep(0.05) 
         return Action.do_nothing()
     
     def get_agent_type(self) -> str:
