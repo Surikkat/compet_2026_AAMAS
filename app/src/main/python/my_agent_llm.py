@@ -25,9 +25,8 @@ class LLMAgent:
         self.running = True
         self.lock = threading.Lock()
 
-        self.prompt_path = "/home/maria/phystech/projects/game_planet_wars/compet_2026_AAMAS/app/src/main/python/prompt_en.md"
+        self.prompt_path = "/home/surikkat/code/comp/planet-wars-rts/app/src/main/python/prompt_en.md"
 
-        # Load prompt template
         try:
             with open(self.prompt_path, "r", encoding="utf-8") as f:
                 self.prompt_template = f.read()
@@ -35,54 +34,59 @@ class LLMAgent:
             print("[Warning] prompt.md not found! Using default template.")
             self.prompt_template = "State:\n{state_summary}\nOutput [A, P, E, N] as floats summing to 1.0."
 
+
     def _parse_state(self, game_state: GameState, player: Player) -> str:
-        my_planet = 0
-        my_total_ships, my_ships_on_planet, my_ships_on_flight = 0.0, 0.0, 0.0
-        my_growth = 0.0 
+            my_planet = 0
+            my_ships_on_planet = 0.0
+            my_ships_on_flight = 0.0
+            my_growth = 0.0 
 
-        enemy_planet = 0
-        enemy_total_ships, enemy_ships_on_planet, enemy_ships_on_flight = 0.0, 0.0, 0.0
-        enemy_growth = 0.0
+            enemy_planet = 0
+            enemy_ships_on_planet = 0.0
+            enemy_ships_on_flight = 0.0
+            enemy_growth = 0.0
 
-        neutral_planets = 0
-        neutral_ships_on_planet=0.0
+            neutral_planets = 0
+            neutral_ships_on_planet = 0.0
 
-        for p in game_state.planets:
-            if p.owner == player:
-                my_planet += 1
-                my_ships_on_planet += p.n_ships
-                my_growth += p.growth_rate
+            # Считаем корабли на планетах и в транспорте
+            for p in game_state.planets:
+                if p.owner == player:
+                    my_planet += 1
+                    my_ships_on_planet += p.n_ships
+                    my_growth += p.growth_rate
+                elif p.owner == player.opponent():
+                    enemy_planet += 1
+                    enemy_ships_on_planet += p.n_ships
+                    enemy_growth += p.growth_rate
+                elif p.owner == Player.Neutral:
+                    neutral_planets += 1
+                    neutral_ships_on_planet += p.n_ships
 
-            elif p.owner == player.opponent():
-                enemy_planet += 1
-                enemy_ships_on_planet += p.n_ships
-                enemy_growth += p.growth_rate
+                # Флоты хранятся как transporter у каждой планеты
+                if p.transporter is not None:
+                    if p.transporter.owner == player:
+                        my_ships_on_flight += p.transporter.n_ships
+                    elif p.transporter.owner == player.opponent():
+                        enemy_ships_on_flight += p.transporter.n_ships
 
-            elif p.owner == Player.Neutral:
-                neutral_planets += 1
-                neutral_ships_on_planet += p.n_ships
+            my_total_ships = my_ships_on_planet + my_ships_on_flight
+            enemy_total_ships = enemy_ships_on_planet + enemy_ships_on_flight
 
-            if p.transporter is not None:
-                if p.transporter.owner == player:
-                    my_ships_on_flight += p.transporter.n_ships
-                elif p.transporter.owner == player.opponent():
-                    enemy_ships_on_flight += p.transporter.n_ships
-
-        my_total_ships = my_ships_on_planet + my_ships_on_flight
-        enemy_total_ships = enemy_ships_on_planet + enemy_ships_on_flight
-
-        return json.dumps({
-            "my_planet": my_planet,
-            "my_total_ships": int(my_total_ships),
-            "my_ships_on_flight": int(my_ships_on_flight),
-            "my_growth": round(my_growth, 2),
-            "enemy_planet": enemy_planet,
-            "enemy_total_ships": int(enemy_total_ships),
-            "enemy_ships_on_flight": int(enemy_ships_on_flight),
-            "enemy_growth": round(enemy_growth, 2),
-            "neutral_planets": neutral_planets,
-            "neutral_ships_on_planet": int(neutral_ships_on_planet),
-        }, indent=2)
+            return json.dumps({
+                "my_planet": my_planet,
+                "my_total_ships": int(my_total_ships),
+                "my_ships_on_planet": int(my_ships_on_planet),
+                "my_ships_on_flight": int(my_ships_on_flight),
+                "my_growth": round(my_growth, 2),
+                "enemy_planet": enemy_planet,
+                "enemy_total_ships": int(enemy_total_ships),
+                "enemy_ships_on_planet": int(enemy_ships_on_planet),
+                "enemy_ships_on_flight": int(enemy_ships_on_flight),
+                "enemy_growth": round(enemy_growth, 2),
+                "neutral_planets": neutral_planets,
+                "neutral_ships_on_planet": int(neutral_ships_on_planet),
+            }, indent=2)
 
 
     def _get_llm_output(self, state_summary: str) -> str:

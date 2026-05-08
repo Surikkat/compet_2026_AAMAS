@@ -9,8 +9,6 @@ from rl_agent.dqn_agent import DQNAgent
 from my_agent_llm import LLMAgent
 
 class MyPythonAgent(PlanetWarsPlayer):
-    """Мой первый Python-агент для Planet Wars"""
-
     def __init__(self, checkpoint_path: Optional[str] = None):
         super().__init__()
         self.dqn_agent = DQNAgent(checkpoint_path=checkpoint_path)
@@ -38,14 +36,10 @@ class MyPythonAgent(PlanetWarsPlayer):
             self.llm_thread.start()
     
     def _sync_llm_strategy(self) -> None:
-        """Передать текущую стратегию от LLM к DQN."""
         if self.llm_agent is None:
             return
         with self._strategy_lock:
-            # Берём копию стратегии, чтобы не менять во время итерации
             strategy_vector = list(self.llm_agent.current_strategy)
-        # DQN ожидает словарь {planet_id: [p_accumulate, p_attack_enemy, ...]}
-        # Пока у нас глобальный вектор, поэтому оборачиваем в ожидаемый формат
         strategy_dict = {}
         if self.latest_state:
             for planet in self.latest_state.planets:
