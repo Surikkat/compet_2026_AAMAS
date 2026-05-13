@@ -100,8 +100,8 @@ class RewardCalculator:
         """
         Reward the agent for following the LLM's order.
 
-        +5.0 if the action matches the command.
-        -1.0 if the action contradicts the command.
+        +0.5 if the action matches the command.
+        -0.1 if the action contradicts the command.
         """
         # DO_NOTHING action
         is_noop = (
@@ -110,11 +110,11 @@ class RewardCalculator:
         )
 
         if llm_command == "N":
-            return 5.0 if is_noop else -1.0
+            return 0.5 if is_noop else -0.1
 
         if is_noop:
             # LLM said do something, but agent did nothing
-            return -1.0
+            return -0.1
 
         # Find the target planet to determine its owner
         target = None
@@ -127,13 +127,13 @@ class RewardCalculator:
             return 0.0
 
         if llm_command == "A" and target.owner == self.player.opponent():
-            return 5.0
+            return 0.5
         elif llm_command == "P" and target.owner == self.player:
-            return 5.0
+            return 0.5
         elif llm_command == "E" and target.owner == Player.Neutral:
-            return 5.0
+            return 0.5
         else:
-            return -1.0
+            return -0.1
 
     # ------------------------------------------------------------------
     # Helpers
