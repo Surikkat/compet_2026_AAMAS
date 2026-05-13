@@ -1,7 +1,7 @@
 """
 DQN neural network for Pairwise Planet Wars agent.
 
-A small MLP that maps a 23-dim feature vector (source-target pair encoding)
+A small MLP that maps a 25-dim feature vector (source-target pair encoding)
 to Q-values for 5 discrete actions (ship fractions: 0%, 25%, 50%, 75%, 100%).
 """
 
@@ -12,11 +12,19 @@ from rl_agent.state_encoder import FEATURE_DIM
 from rl_agent.action_decoder import NUM_ACTIONS
 
 
+# ── Device auto-detection (CUDA → MPS → CPU) ──────────────────────────
+DEVICE = torch.device(
+    "cuda" if torch.cuda.is_available()
+    else "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    else "cpu"
+)
+
+
 class DQNNetwork(nn.Module):
     """
     Simple MLP for pairwise Q-value estimation.
 
-    Architecture: Input(23) → 128 → ReLU → 64 → ReLU → 5
+    Architecture: Input(25) → 128 → ReLU → 64 → ReLU → 5
     Inference time: <1ms for a batch of 900 vectors on CPU.
     """
 

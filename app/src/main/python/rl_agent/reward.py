@@ -1,18 +1,20 @@
 """
 Reward calculator for DQN training.
 
-Computes per-tick reward based on changes in ship counts and planet ownership.
+Computes per-tick reward based on changes in ship counts, planet ownership,
+and **command compliance** (whether the agent followed the LLM's order).
 
 Reward formula:
-  reward = (Δmy_ships - Δenemy_ships) * 0.01
-         + Δmy_planets * 10.0
-         - Δenemy_planets * 10.0
-         + 100.0  (if we won)
-         - 100.0  (if we lost)
+  reward = (Δmy_ships - Δenemy_ships) * 0.005
+         + Δmy_planets * 5.0
+         - Δenemy_planets * 5.0
+         + command_bonus (±5.0 / −1.0)
+         + 20.0  (if we won)
+         - 20.0  (if we lost)
 """
 
 from typing import Optional
-from core.game_state import GameState, Player
+from core.game_state import GameState, Player, Action
 
 
 class RewardCalculator:
@@ -41,6 +43,8 @@ class RewardCalculator:
         game_state: GameState,
         done: bool,
         winner: Optional[Player],
+        action: Optional[Action] = None,
+        llm_command: str = "",
     ) -> float:
         """
         Compute reward for the latest tick.
@@ -49,6 +53,9 @@ class RewardCalculator:
             game_state: Game state AFTER the tick was executed.
             done: Whether the game ended this tick.
             winner: The winning player if done, else None.
+            action: The Action that was taken (for command compliance).
+            llm_command: The LLM command letter for the source planet
+                         ('A', 'P', 'E', 'N', or '' if unavailable).
 
         Returns:
             Float reward value.
@@ -68,11 +75,16 @@ class RewardCalculator:
         reward += d_my_planets * 5.0
         reward -= d_enemy_planets * 5.0
 
+        # ── Command Compliance Bonus ──────────────────────────────────
+        if llm_command and action is not None:
+            reward += self._command_bonus(action, llm_command, game_state)
+
+        # ── Win / Loss ────────────────────────────────────────────────
         if done and winner is not None:
             if winner == self.player:
-                reward += 50.0
+                reward += 20.0
             elif winner == self.player.opponent():
-                reward -= 50.0
+                reward -= 20.0
 
         # Update state for next call
         self._prev_my_ships = my_ships
@@ -81,6 +93,47 @@ class RewardCalculator:
         self._prev_enemy_planets = enemy_planets
 
         return reward
+
+    def _command_bonus(
+        self, action: Action, llm_command: str, game_state: GameState
+    ) -> float:
+        """
+        Reward the agent for following the LLM's order.
+
+        +5.0 if the action matches the command.
+        -1.0 if the action contradicts the command.
+        """
+        # DO_NOTHING action
+        is_noop = (
+            action.source_planet_id == -1
+            or action.num_ships <= 0
+        )
+
+        if llm_command == "N":
+            return 5.0 if is_noop else -1.0
+
+        if is_noop:
+            # LLM said do something, but agent did nothing
+            return -1.0
+
+        # Find the target planet to determine its owner
+        target = None
+        for p in game_state.planets:
+            if p.id == action.destination_planet_id:
+                target = p
+                break
+
+        if target is None:
+            return 0.0
+
+        if llm_command == "A" and target.owner == self.player.opponent():
+            return 5.0
+        elif llm_command == "P" and target.owner == self.player:
+            return 5.0
+        elif llm_command == "E" and target.owner == Player.Neutral:
+            return 5.0
+        else:
+            return -1.0
 
     # ------------------------------------------------------------------
     # Helpers

@@ -12,6 +12,8 @@ from typing import Tuple
 import numpy as np
 import torch
 
+from rl_agent.dqn_network import DEVICE
+
 
 class ReplayBuffer:
     """Fixed-size circular buffer for storing experience tuples."""
@@ -31,7 +33,7 @@ class ReplayBuffer:
         Store a transition.
 
         Args:
-            state: Feature vector of the chosen pair, shape (23,).
+            state: Feature vector of the chosen pair, shape (25,).
             action: Action index (0–4).
             reward: Reward received after this action.
             next_state: Feature vector of the same pair at the next tick.
@@ -46,22 +48,22 @@ class ReplayBuffer:
         Sample a random mini-batch of transitions.
 
         Returns:
-            Tuple of tensors:
-              states:      (batch_size, 23)
+            Tuple of tensors (on DEVICE):
+              states:      (batch_size, 25)
               actions:     (batch_size,) long
               rewards:     (batch_size,)
-              next_states: (batch_size, 23)
+              next_states: (batch_size, 25)
               dones:       (batch_size,) float (1.0 if done)
         """
         batch = random.sample(self.buffer, batch_size)
         states, actions, rewards, next_states, dones = zip(*batch)
 
         return (
-            torch.FloatTensor(np.array(states)),
-            torch.LongTensor(actions),
-            torch.FloatTensor(rewards),
-            torch.FloatTensor(np.array(next_states)),
-            torch.FloatTensor([float(d) for d in dones]),
+            torch.FloatTensor(np.array(states)).to(DEVICE),
+            torch.LongTensor(actions).to(DEVICE),
+            torch.FloatTensor(rewards).to(DEVICE),
+            torch.FloatTensor(np.array(next_states)).to(DEVICE),
+            torch.FloatTensor([float(d) for d in dones]).to(DEVICE),
         )
 
     def __len__(self) -> int:

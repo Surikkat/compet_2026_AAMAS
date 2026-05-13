@@ -1,3 +1,4 @@
+import os
 import time
 import json
 import re
@@ -21,11 +22,11 @@ class LLMAgent:
 
         self.last_update_time = 0.0
         self.update_interval = 5.0 # seconds
-        self.update_interval = 4.0
+        self.update_interval = 5.0
         self.running = True
         self.lock = threading.Lock()
 
-        self.prompt_path = "/home/surikkat/code/comp/planet-wars-rts/app/src/main/python/prompt_en.md"
+        self.prompt_path = os.path.join(os.path.dirname(__file__), "prompt_en.md")
 
         try:
             with open(self.prompt_path, "r", encoding="utf-8") as f:
@@ -93,7 +94,7 @@ class LLMAgent:
         prompt = self.prompt_template.format(state_summary=state_summary)
         try:
             response = self.client.chat.completions.create(
-                model="openai/gpt-4o-mini",
+                model="deepseek/deepseek-chat",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 max_tokens=30,
