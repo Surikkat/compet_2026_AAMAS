@@ -63,7 +63,7 @@ tasks.named<ShadowJar>("shadowJar") {
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(22) // Java 21 LTS - best compatibility
+        languageVersion = JavaLanguageVersion.of(21) // Java 21 LTS - best compatibility
     }
 }
 
@@ -72,7 +72,7 @@ java {
 //}
 
 kotlin {
-    jvmToolchain(22) // Ensure Kotlin targets JVM 21 as well
+    jvmToolchain(21) // Ensure Kotlin targets JVM 21 as well
 }
 
 tasks.register<JavaExec>("runEvaluation") {
