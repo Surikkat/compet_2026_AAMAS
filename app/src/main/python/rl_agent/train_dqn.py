@@ -135,7 +135,10 @@ def train_step(
     return loss.item()
 
 
-def run_training(num_episodes: int, save_path: str) -> None:
+def run_training(
+    num_episodes: int,
+    save_path: str = os.path.join(os.path.dirname(__file__), "checkpoints", "dqn_latest.pt")
+):
     """Main training loop."""
 
     # Ensure checkpoint directory exists

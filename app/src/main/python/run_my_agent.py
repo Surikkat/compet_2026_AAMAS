@@ -1,21 +1,29 @@
+"""
+Local test script: runs the DQN agent against baseline opponents.
+
+Usage:
+    python run_my_agent.py [--games N] [--checkpoint PATH]
+"""
+
 import argparse
 import time
 
 from core.game_state import GameParams, Player
 from core.unified_game_runner import UnifiedGameRunner
+from core.forward_model import ForwardModel
 from agents.fully_observable_agent_adapter import as_unified
 from agents.random_agents import CarefulRandomAgent
 from agents.greedy_heuristic_agent import GreedyHeuristicAgent
-
-
 from my_agent import MyPythonAgent
 
 
 def run_evaluation(n_games: int, checkpoint_path: str = None):
+    """Run DQN agent against GreedyHeuristic and report win rate."""
+
     params = GameParams(num_planets=20)
 
     agent1 = MyPythonAgent(checkpoint_path=checkpoint_path)
-    agent2 = CarefulRandomAgent()
+    agent2 = GreedyHeuristicAgent()
 
     runner = UnifiedGameRunner(
         as_unified(agent1),
@@ -38,6 +46,7 @@ def run_evaluation(n_games: int, checkpoint_path: str = None):
     print(f"  Greedy wins:   {losses} ({losses/n_games*100:.1f}%)")
     print(f"  Draws:         {draws}")
     print(f"  Time per game: {elapsed/n_games*1000:.0f} ms")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test DQN agent locally")

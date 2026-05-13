@@ -1,52 +1,27 @@
+"""
+Main agent entry point for the competition.
+
+Wraps the DQN-based RL agent and provides the interface expected by
+the game runner and competition server.
+
+The LLM strategy integration layer (separate team) will call
+set_llm_strategy() on the inner DQN agent periodically.
+"""
+
 from typing import Optional
-from core.game_state import GameState, GameParams, Player, Action
+
 from agents.planet_wars_agent import PlanetWarsPlayer
-
-import os
-import threading
-
+from core.game_state import GameState, GameParams, Player, Action
 from rl_agent.dqn_agent import DQNAgent
-from my_agent_llm import LLMAgent
+
 
 class MyPythonAgent(PlanetWarsPlayer):
+    """Competition agent: DQN RL with LLM strategy support."""
+
     def __init__(self, checkpoint_path: Optional[str] = None):
         super().__init__()
         self.dqn_agent = DQNAgent(checkpoint_path=checkpoint_path)
 
-        api_key = os.environ.get("OPEN_ROUTER_API_KEY")
-        if not api_key:
-            raise ValueError("API ключ OPENROUTER_API_KEY не найден в .env")
-
-        self.llm_agent = LLMAgent(
-            api_key=api_key, 
-            base_url="https://openrouter.ai/api/v1"
-        ) 
-        self.latest_state = None
-        self._strategy_lock = threading.Lock()
-
-        if self.llm_agent:
-            self.llm_thread = threading.Thread(
-                target=self.llm_agent.run,
-                args=(
-                    lambda: self.latest_state,
-                    lambda: getattr(self, 'player', None)
-                ),
-                daemon=True
-            )
-            self.llm_thread.start()
-    
-    def _sync_llm_strategy(self) -> None:
-        if self.llm_agent is None:
-            return
-        with self._strategy_lock:
-            strategy_vector = list(self.llm_agent.current_strategy)
-        strategy_dict = {}
-        if self.latest_state:
-            for planet in self.latest_state.planets:
-                strategy_dict[planet.id] = strategy_vector
-        
-        self.dqn_agent.set_llm_strategy(strategy_dict)
-    
     def prepare_to_play_as(
         self,
         player: Player,
@@ -58,10 +33,6 @@ class MyPythonAgent(PlanetWarsPlayer):
         return self.get_agent_type()
 
     def get_action(self, game_state: GameState) -> Action:
-        self.latest_state = game_state
-
-        self._sync_llm_strategy()
-
         return self.dqn_agent.get_action(game_state)
 
     def get_agent_type(self) -> str:
