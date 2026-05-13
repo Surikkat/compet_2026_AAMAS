@@ -1,3 +1,4 @@
+import os
 import time
 import json
 import re
@@ -5,7 +6,6 @@ import random
 import threading
 from typing import Optional, List
 from openai import OpenAI
-from google import genai
 
 from core.game_state import GameState, Action, Player
 from agents.planet_wars_agent import PlanetWarsPlayer
@@ -23,7 +23,7 @@ class LLMAgent:
         self.update_interval = 5.0 # seconds
         self.running = True
         self.lock = threading.Lock()
-        self.prompt_path = "/home/maria/phystech/projects/game_planet_wars/compet_2026_AAMAS/app/src/main/python/v2_prompt_en.md"
+        self.prompt_path = os.path.join(os.path.dirname(__file__), "v2_prompt_en.md")
         # Load prompt template
         try:
             with open(self.prompt_path, "r", encoding="utf-8") as f:
@@ -125,7 +125,7 @@ class LLMAgent:
         prompt = self.prompt_template.replace("{state_summary}", state_summary)
         try:
             response = self.client.chat.completions.create(
-                model="openai/gpt-4o-mini",
+                model="deepseek/deepseek-chat",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
                 max_tokens=200,

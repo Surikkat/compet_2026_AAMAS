@@ -25,8 +25,27 @@ from core.game_state import GameState, GameParams, Planet, Player
 # Default LLM strategy (uniform) used as fallback
 DEFAULT_LLM_VEC = [0.25, 0.25, 0.25, 0.25]
 
+# Letter-to-vector mapping for per-planet LLM commands (V2 format)
+LETTER_TO_VEC = {
+    'A': [1.0, 0.0, 0.0, 0.0],  # Attack
+    'P': [0.0, 1.0, 0.0, 0.0],  # Protect
+    'E': [0.0, 0.0, 1.0, 0.0],  # Expand
+    'N': [0.0, 0.0, 0.0, 1.0],  # Nothing
+}
+
 # Feature dimension
 FEATURE_DIM = 25
+
+
+def _resolve_llm_vec(llm_strategy: dict, planet_id: int) -> list:
+    """Resolve an LLM strategy entry to a 4-float vector.
+
+    Handles both V1 format (list of 4 floats) and V2 format (single letter).
+    """
+    val = llm_strategy.get(planet_id, DEFAULT_LLM_VEC)
+    if isinstance(val, str):
+        return LETTER_TO_VEC.get(val, DEFAULT_LLM_VEC)
+    return val
 
 
 class StateEncoder:
@@ -115,7 +134,7 @@ class StateEncoder:
             ], dtype=np.float32)
 
             llm_vec = np.array(
-                llm_strategy.get(src.id, DEFAULT_LLM_VEC), dtype=np.float32
+                _resolve_llm_vec(llm_strategy, src.id), dtype=np.float32
             )
 
             for tgt in planets:
@@ -221,7 +240,7 @@ class StateEncoder:
         ], dtype=np.float32)
 
         llm_vec = np.array(
-            llm_strategy.get(source.id, DEFAULT_LLM_VEC), dtype=np.float32
+            _resolve_llm_vec(llm_strategy, source.id), dtype=np.float32
         )
 
         return np.concatenate([src_feats, tgt_feats, global_feats, llm_vec])

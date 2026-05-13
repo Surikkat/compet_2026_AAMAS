@@ -19,7 +19,7 @@ from core.game_state import GameState, GameParams, Player, Action
 
 from rl_agent.state_encoder import StateEncoder, FEATURE_DIM
 from rl_agent.action_decoder import ActionDecoder, NUM_ACTIONS
-from rl_agent.dqn_network import DQNNetwork
+from rl_agent.dqn_network import DQNNetwork, DEVICE
 
 
 # Default checkpoint path (relative to PYTHONPATH root)
@@ -65,7 +65,7 @@ class DQNAgent(PlanetWarsPlayer):
         self._network = DQNNetwork()
         if os.path.exists(self._checkpoint_path):
             self._network.load_state_dict(
-                torch.load(self._checkpoint_path, map_location="cpu", weights_only=True)
+                torch.load(self._checkpoint_path, map_location=DEVICE, weights_only=True)
             )
             print(f"[DQNAgent] Loaded weights from {self._checkpoint_path}")
         else:
@@ -73,6 +73,7 @@ class DQNAgent(PlanetWarsPlayer):
                 f"[DQNAgent] WARNING: No checkpoint at {self._checkpoint_path}, "
                 f"using random weights!"
             )
+        self._network.to(DEVICE)
         self._network.eval()
 
         return self.get_agent_type()
@@ -92,7 +93,9 @@ class DQNAgent(PlanetWarsPlayer):
 
         # Batched forward pass
         with torch.no_grad():
-            q_values = self._network(torch.FloatTensor(features))  # (N, 5)
+            q_values = self._network(
+                torch.FloatTensor(features).to(DEVICE)
+            )  # (N, 5)
 
         # Find global maximum Q-value
         flat_idx = q_values.argmax().item()

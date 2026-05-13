@@ -1,9 +1,10 @@
 """
-DQN Training script for Planet Wars Pairwise RL Agent.
+DQN Training script for Planet Wars Pairwise RL Agent (V2 — per-planet LLM).
 
 Trains the DQN network by running self-play episodes against a
-GreedyHeuristicAgent opponent. Randomizes game parameters to match
-AAMAS 2026 competition settings.
+GreedyHeuristicAgent opponent. During training, the V2 LLM is called
+every LLM_CALL_INTERVAL ticks to provide per-planet strategy letters
+(A/P/E/N), so the RL agent learns to follow granular orders.
 
 Usage:
     python rl_agent/train_dqn.py [--episodes N] [--save-path PATH]
@@ -22,6 +23,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from core.game_state import GameState, GameParams, Player, Action
 from core.game_state_factory import GameStateFactory
@@ -29,11 +33,14 @@ from core.forward_model import ForwardModel
 from agents.greedy_heuristic_agent import GreedyHeuristicAgent
 from agents.random_agents import CarefulRandomAgent
 
-from rl_agent.state_encoder import StateEncoder, FEATURE_DIM
+from rl_agent.state_encoder import StateEncoder, FEATURE_DIM, DEFAULT_LLM_VEC, LETTER_TO_VEC
 from rl_agent.action_decoder import ActionDecoder, NUM_ACTIONS
-from rl_agent.dqn_network import DQNNetwork
+from rl_agent.dqn_network import DQNNetwork, DEVICE
 from rl_agent.replay_buffer import ReplayBuffer
 from rl_agent.reward import RewardCalculator
+
+# ── V2 LLM client for training (per-planet strategy) ─────────────────
+from v2_my_agent_llm import LLMAgent as V2LLMAgent
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -51,7 +58,8 @@ EPS_DECAY_STEPS = 100_000     # linear ε decay over this many steps
 TRAIN_START = 1000             # fill buffer before training begins
 LOG_INTERVAL = 50              # episodes between log prints
 SAVE_INTERVAL = 200            # episodes between checkpoint saves
-MAX_TICKS_TRAIN = 2000          # shorter episodes for faster training
+MAX_TICKS_TRAIN = 500          # shorter episodes for faster training
+LLM_CALL_INTERVAL = 100       # ticks between LLM API calls (~5 game-seconds)
 
 
 def random_game_params() -> GameParams:
@@ -135,18 +143,31 @@ def train_step(
     return loss.item()
 
 
+def _init_llm_agent() -> Optional[V2LLMAgent]:
+    """Try to initialise the V2 LLM agent for training. Returns None if no key."""
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        print("[train] WARNING: OPENROUTER_API_KEY not set → training WITHOUT LLM")
+        return None
+    agent = V2LLMAgent(api_key=api_key, base_url="https://openrouter.ai/api/v1")
+    print(f"[train] V2 LLM agent initialised (model: deepseek/deepseek-chat, per-planet)")
+    return agent
+
+
 def run_training(
     num_episodes: int,
     save_path: str = os.path.join(os.path.dirname(__file__), "checkpoints", "dqn_latest.pt")
-):
+) -> None:
     """Main training loop."""
 
     # Ensure checkpoint directory exists
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
 
-    # Networks
-    policy_net = DQNNetwork()
-    target_net = DQNNetwork()
+    print(f"[train] Using device: {DEVICE}")
+
+    # Networks — move to GPU/MPS
+    policy_net = DQNNetwork().to(DEVICE)
+    target_net = DQNNetwork().to(DEVICE)
     target_net.load_state_dict(policy_net.state_dict())
     target_net.eval()
 
@@ -154,14 +175,18 @@ def run_training(
     buffer = ReplayBuffer(BUFFER_CAPACITY)
     decoder = ActionDecoder()
 
+    # V2 LLM agent for generating per-planet strategies during training
+    llm_agent = _init_llm_agent()
+
     global_step = 0
     episode_rewards: List[float] = []
     episode_wins: List[bool] = []
     recent_losses: List[float] = []
+    llm_calls_total = 0
 
     t_start = time.time()
-    
-    pbar = tqdm(range(1, num_episodes + 1), desc="Training DQN")
+
+    pbar = tqdm(range(1, num_episodes + 1), desc="Training DQN (V2)")
     for episode in pbar:
         # --- Setup episode ------------------------------------------------
         params = random_game_params()
@@ -180,14 +205,40 @@ def run_training(
 
         reward_calc.reset(fm.state)
 
-        # Mock LLM strategy (uniform)
+        # Per-planet LLM strategy — letters are stored directly
+        # Format: {planet_id: 'A'/'P'/'E'/'N'}
+        llm_strategy_letters: Dict[int, str] = {}
+        # Converted to vectors for the encoder
+        # Format: {planet_id: [1.0, 0.0, 0.0, 0.0]}
         llm_strategy: Dict[int, List[float]] = {}
 
         ep_reward = 0.0
         epsilon = max(EPS_END, EPS_START - global_step / EPS_DECAY_STEPS)
+        tick_count = 0
 
         # --- Episode loop -------------------------------------------------
         while not fm.is_terminal():
+            # ── Call V2 LLM periodically (per-planet) ─────────────────
+            if llm_agent and tick_count % LLM_CALL_INTERVAL == 0:
+                try:
+                    my_planet_ids = [
+                        p.id for p in fm.state.planets
+                        if p.owner == Player.Player1
+                    ]
+                    state_summary = llm_agent._parse_state(fm.state, Player.Player1)
+                    raw_response = llm_agent._get_llm_output(state_summary)
+                    strategy_dict = llm_agent._validate(raw_response, my_planet_ids)
+                    # strategy_dict = {planet_id: 'A'/'P'/'E'/'N'}
+                    if strategy_dict:
+                        llm_strategy_letters = strategy_dict
+                        # Convert letters to one-hot vectors for encoder
+                        llm_strategy = {}
+                        for pid, letter in strategy_dict.items():
+                            llm_strategy[pid] = LETTER_TO_VEC.get(letter, DEFAULT_LLM_VEC)
+                    llm_calls_total += 1
+                except Exception as e:
+                    tqdm.write(f"[LLM Error] {e}")
+
             # Encode all valid pairs
             features, pair_info = encoder.encode_all_pairs(
                 fm.state, Player.Player1, llm_strategy
@@ -198,10 +249,13 @@ def run_training(
                 our_action = Action.do_nothing()
                 chosen_features = None
                 action_idx = 0
+                source = None
             else:
-                # Forward pass
+                # Forward pass (on GPU)
                 with torch.no_grad():
-                    q_values = policy_net(torch.FloatTensor(features))
+                    q_values = policy_net(
+                        torch.FloatTensor(features).to(DEVICE)
+                    )
 
                 pair_idx, action_idx = select_action(
                     q_values, epsilon, len(pair_info)
@@ -224,7 +278,15 @@ def run_training(
 
             done = fm.is_terminal()
             winner = fm.get_leader() if done else None
-            reward = reward_calc.compute(fm.state, done, winner)
+
+            # Determine LLM command for this source planet (per-planet letter)
+            llm_cmd = ""
+            if source is not None:
+                llm_cmd = llm_strategy_letters.get(source.id, "")
+
+            reward = reward_calc.compute(
+                fm.state, done, winner, our_action, llm_cmd
+            )
             ep_reward += reward
 
             # Store transition (only when we made a real choice)
@@ -240,6 +302,7 @@ def run_training(
                     buffer.push(chosen_features, action_idx, reward, next_features, done)
 
             global_step += 1
+            tick_count += 1
 
             # Train on mini-batch
             if len(buffer) >= TRAIN_START and len(buffer) >= BATCH_SIZE:
@@ -270,21 +333,21 @@ def run_training(
                 'WR': f'{recent_wr:.1f}%',
                 'Reward': f'{avg_reward:.1f}',
                 'Loss': f'{avg_loss:.3f}',
-                'eps': f'{eps:.2f}'
+                'eps': f'{eps:.2f}',
+                'LLM': llm_calls_total,
             })
 
         # --- Checkpointing ------------------------------------------------
         if episode % SAVE_INTERVAL == 0:
             torch.save(policy_net.state_dict(), save_path)
-            # Optional: log checkpoint via tqdm.write if needed:
-            # tqdm.write(f"  → Checkpoint saved to {save_path}")
 
     pbar.close()
-    
+
     # Final save
     torch.save(policy_net.state_dict(), save_path)
     print(f"\nTraining complete. Final checkpoint: {save_path}")
     print(f"Total steps: {global_step}")
+    print(f"Total LLM API calls: {llm_calls_total}")
     total_wr = sum(episode_wins) / len(episode_wins) * 100
     print(f"Overall win rate: {total_wr:.1f}%")
 
@@ -294,14 +357,14 @@ def run_training(
 # ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train DQN agent for Planet Wars")
+    parser = argparse.ArgumentParser(description="Train DQN agent for Planet Wars (V2 per-planet)")
     parser.add_argument(
         "--episodes", type=int, default=3000,
         help="Number of training episodes (default: 3000)",
     )
     parser.add_argument(
         "--save-path", type=str,
-        default="rl_agent/checkpoints/dqn_latest.pt",
+        default=os.path.join(os.path.dirname(__file__), "checkpoints", "dqn_latest.pt"),
         help="Path for saving model checkpoints",
     )
     args = parser.parse_args()
