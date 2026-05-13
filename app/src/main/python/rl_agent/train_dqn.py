@@ -39,8 +39,10 @@ from rl_agent.dqn_network import DQNNetwork, DEVICE
 from rl_agent.replay_buffer import ReplayBuffer
 from rl_agent.reward import RewardCalculator
 
-# ── V2 LLM client for training (per-planet strategy) ─────────────────
-from v2_my_agent_llm import LLMAgent as V2LLMAgent
+import json
+
+# ── Mock LLM (Dataset Cache) ─────────────────────────────────────────
+CACHE_PATH = os.path.join(os.path.dirname(__file__), "llm_cache.json")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -143,15 +145,62 @@ def train_step(
     return loss.item()
 
 
-def _init_llm_agent() -> Optional[V2LLMAgent]:
-    """Try to initialise the V2 LLM agent for training. Returns None if no key."""
-    api_key = os.environ.get("OPENROUTER_API_KEY")
-    if not api_key:
-        print("[train] WARNING: OPENROUTER_API_KEY not set → training WITHOUT LLM")
-        return None
-    agent = V2LLMAgent(api_key=api_key, base_url="https://openrouter.ai/api/v1")
-    print(f"[train] V2 LLM agent initialised (model: deepseek/deepseek-chat, per-planet)")
-    return agent
+def extract_planet_state_vector(planet, state: GameState, player: Player) -> np.ndarray:
+    """Extract 3-dimensional continuous state vector for a single planet."""
+    enemy_planets = [p for p in state.planets if p.owner == player.opponent()]
+    if not enemy_planets:
+        return np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        
+    avg_enemy_x = sum(p.position.x for p in enemy_planets) / len(enemy_planets)
+    avg_enemy_y = sum(p.position.y for p in enemy_planets) / len(enemy_planets)
+    
+    my_planets = [p for p in state.planets if p.owner == player]
+    if not my_planets:
+        return np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        
+    distances = [((p.position.x - avg_enemy_x)**2 + (p.position.y - avg_enemy_y)**2)**0.5 for p in my_planets]
+    threshold = sum(distances) / len(distances)
+    
+    dist = ((planet.position.x - avg_enemy_x)**2 + (planet.position.y - avg_enemy_y)**2)**0.5
+    is_frontline = 1.0 if dist <= threshold else 0.0
+    
+    my_ships = sum(p.n_ships for p in state.planets if p.owner == player) + 1e-5
+    ship_ratio = planet.n_ships / my_ships
+    
+    max_growth = max(p.growth_rate for p in state.planets) + 1e-5
+    growth_ratio = planet.growth_rate / max_growth
+    
+    return np.array([is_frontline, ship_ratio, growth_ratio], dtype=np.float32)
+
+def _load_llm_cache() -> list:
+    """Load pre-generated dataset of LLM strategies."""
+    if not os.path.exists(CACHE_PATH):
+        print(f"[train] WARNING: Cache file {CACHE_PATH} not found.")
+        print(f"[train] Please run generate_llm_cache.py first. Using random commands.")
+        return []
+    with open(CACHE_PATH, "r") as f:
+        data = json.load(f)
+    print(f"[train] Loaded {len(data)} cached LLM strategies.")
+    
+    # Convert lists to numpy arrays for fast distance computation
+    for item in data:
+        item["state_vector"] = np.array(item["state_vector"], dtype=np.float32)
+    return data
+
+def _get_cached_strategy(cache: list, state_vec: np.ndarray) -> str:
+    """Find nearest strategy in cache using Euclidean distance."""
+    if not cache:
+        # Fallback to default action
+        return "N"
+    
+    min_dist = float('inf')
+    best_strategy = cache[0]["strategy"]
+    for item in cache:
+        dist = np.linalg.norm(item["state_vector"] - state_vec)
+        if dist < min_dist:
+            min_dist = dist
+            best_strategy = item["strategy"]
+    return best_strategy
 
 
 def run_training(
@@ -175,8 +224,8 @@ def run_training(
     buffer = ReplayBuffer(BUFFER_CAPACITY)
     decoder = ActionDecoder()
 
-    # V2 LLM agent for generating per-planet strategies during training
-    llm_agent = _init_llm_agent()
+    # Load Mock LLM cache
+    llm_cache = _load_llm_cache()
 
     global_step = 0
     episode_rewards: List[float] = []
@@ -218,26 +267,15 @@ def run_training(
 
         # --- Episode loop -------------------------------------------------
         while not fm.is_terminal():
-            # ── Call V2 LLM periodically (per-planet) ─────────────────
-            if llm_agent and tick_count % LLM_CALL_INTERVAL == 0:
-                try:
-                    my_planet_ids = [
-                        p.id for p in fm.state.planets
-                        if p.owner == Player.Player1
-                    ]
-                    state_summary = llm_agent._parse_state(fm.state, Player.Player1)
-                    raw_response = llm_agent._get_llm_output(state_summary)
-                    strategy_dict = llm_agent._validate(raw_response, my_planet_ids)
-                    # strategy_dict = {planet_id: 'A'/'P'/'E'/'N'}
-                    if strategy_dict:
-                        llm_strategy_letters = strategy_dict
-                        # Convert letters to one-hot vectors for encoder
-                        llm_strategy = {}
-                        for pid, letter in strategy_dict.items():
-                            llm_strategy[pid] = LETTER_TO_VEC.get(letter, DEFAULT_LLM_VEC)
-                    llm_calls_total += 1
-                except Exception as e:
-                    tqdm.write(f"[LLM Error] {e}")
+            # ── Call V2 Mock LLM periodically (per-planet) ─────────────────
+            if tick_count % LLM_CALL_INTERVAL == 0:
+                for p in fm.state.planets:
+                    if p.owner == Player.Player1:
+                        p_vec = extract_planet_state_vector(p, fm.state, Player.Player1)
+                        letter = _get_cached_strategy(llm_cache, p_vec)
+                        llm_strategy_letters[p.id] = letter
+                        llm_strategy[p.id] = LETTER_TO_VEC.get(letter, DEFAULT_LLM_VEC)
+                llm_calls_total += 1
 
             # Encode all valid pairs
             features, pair_info = encoder.encode_all_pairs(
