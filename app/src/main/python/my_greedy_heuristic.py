@@ -69,4 +69,4 @@ class MyGreedyHeuristicAgent(PlanetWarsPlayer):
         return Action.do_nothing()
     
     def get_agent_type(self) -> str:
-        return "My Greedy Heuristic v2.0"
+        return "My Greedy Heuristic v3.0"
