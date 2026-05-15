@@ -1,30 +1,32 @@
-from typing import Optional, List
+from typing import Optional, List, Set
 import math
 from core.game_state import GameState, GameParams, Player, Action
 from agents.planet_wars_agent import PlanetWarsPlayer
 
 class RuleBasedAgent(PlanetWarsPlayer):
-    """Агент на правилах логики."""
+    """Агент v1.2 — учёт уже отправленных флотов."""
     
     def __init__(self):
         super().__init__()
-        self._action_count = 0
+        self._targets_with_fleets: Set[int] = set()  # Планеты, к которым уже летят наши флоты
     
     def prepare_to_play_as(
         self, player: Player, params: GameParams, opponent: Optional[str] = None
     ) -> str:
         super().prepare_to_play_as(player, params, opponent)
+        self._targets_with_fleets.clear()
         return self.get_agent_type()
     
     def get_action(self, game_state: GameState) -> Action:
-        self._action_count += 1
-        
         my_planets = [p for p in game_state.planets if p.owner == self.player]
         enemy_planets = [p for p in game_state.planets if p.owner == self.player.opponent()]
         neutral_planets = [p for p in game_state.planets if p.owner == Player.Neutral]
         
         if not my_planets:
             return Action.do_nothing()
+        
+        # Обновляем список целей с уже летящими флотами
+        self._update_fleet_targets(game_state)
         
         # Правило 1: Захватываем нейтральные планеты (ранняя игра)
         if neutral_planets:
@@ -50,21 +52,41 @@ class RuleBasedAgent(PlanetWarsPlayer):
         
         return Action.do_nothing()
     
+    def _update_fleet_targets(self, state: GameState):
+        """Отслеживаем планеты, к которым уже летят наши флоты."""
+        self._targets_with_fleets.clear()
+        
+        # Проверяем через новый API (fleets)
+        if hasattr(state, 'fleets'):
+            for fleet in state.fleets:
+                if fleet.owner == self.player:
+                    target_id = getattr(fleet, 'destination_planet_id', None)
+                    if target_id is not None:
+                        self._targets_with_fleets.add(target_id)
+        
+        # Проверяем через старый API (transporter у планеты)
+        for p in state.planets:
+            if p.owner == self.player and p.transporter:
+                # Не можем узнать цель, но знаем что с планеты что-то отправлено
+                # Добавляем все вражеские/нейтральные планеты рядом как "возможные цели"
+                pass
+    
     def _capture_neutral(self, my_planets: List, neutrals: List) -> Optional[Action]:
         """Захватить самую выгодную нейтральную планету."""
-        # Сортируем нейтралов по привлекательности (growth rate / ships needed)
         best_target = None
         best_score = -1
         best_source = None
         best_ships = 0
         
         for neutral in neutrals:
-            # Сколько кораблей нужно для захвата
+            # Пропускаем нейтралов, к которым уже летят наши флоты
+            if neutral.id in self._targets_with_fleets:
+                continue
+            
             ships_needed = int(neutral.n_ships) + 1
             
             for src in my_planets:
-                if src.n_ships > ships_needed + 1:  # +1 чтобы оставить защиту
-                    # "Выгодность" = growth_rate / (ships_needed * distance)
+                if src.n_ships > ships_needed + 1:
                     distance = self._distance(src, neutral)
                     score = neutral.growth_rate / (ships_needed * max(1, distance))
                     
@@ -72,9 +94,12 @@ class RuleBasedAgent(PlanetWarsPlayer):
                         best_score = score
                         best_target = neutral
                         best_source = src
-                        best_ships = ships_needed + max(1, int(ships_needed * 0.2))  # +20% запас
+                        best_ships = ships_needed + max(1, int(ships_needed * 0.2))
         
         if best_target and best_source:
+            # Отмечаем что к этой планете летит флот
+            self._targets_with_fleets.add(best_target.id)
+            
             return Action(
                 playerId=self.player,
                 sourcePlanetId=best_source.id,
@@ -90,7 +115,6 @@ class RuleBasedAgent(PlanetWarsPlayer):
             if planet.transporter and planet.transporter.owner != self.player:
                 incoming_enemy = int(planet.transporter.n_ships)
                 if planet.n_ships < incoming_enemy:
-                    # Нужна помощь! Ищем ближайшую планету с кораблями
                     help_needed = incoming_enemy - int(planet.n_ships) + 1
                     
                     best_helper = None
@@ -115,31 +139,34 @@ class RuleBasedAgent(PlanetWarsPlayer):
     
     def _attack_enemy(self, my_planets: List, enemies: List) -> Optional[Action]:
         """Атаковать самую слабую планету врага."""
-        # Сортируем врагов: предпочитаем с высоким growth и низкой защитой
         best_target = None
         best_score = -1
         best_source = None
         best_ships = 0
         
         for enemy in enemies:
-            # Учитываем вражеский рост за время полёта
+            # Пропускаем врагов, к которым уже летят наши флоты
+            if enemy.id in self._targets_with_fleets:
+                continue
+            
             for src in my_planets:
                 distance = self._distance(src, enemy)
-                travel_time = distance / 3.0  # transporter_speed = 3.0 по умолчанию
+                travel_time = distance / 3.0
                 enemy_ships_at_arrival = enemy.n_ships + enemy.growth_rate * travel_time
                 ships_needed = int(enemy_ships_at_arrival) + 1
                 
-                if src.n_ships > ships_needed + 1:
-                    # Атакуем если у нас минимум 1.5x преимущество
-                    if src.n_ships > ships_needed * 1.5:
-                        score = enemy.growth_rate / (ships_needed * max(1, distance))
-                        if score > best_score:
-                            best_score = score
-                            best_target = enemy
-                            best_source = src
-                            best_ships = ships_needed + max(1, int(ships_needed * 0.3))
+                if src.n_ships > ships_needed * 1.5:
+                    score = enemy.growth_rate / (ships_needed * max(1, distance))
+                    if score > best_score:
+                        best_score = score
+                        best_target = enemy
+                        best_source = src
+                        best_ships = ships_needed + max(1, int(ships_needed * 0.3))
         
         if best_target and best_source:
+            # Отмечаем что к этой планете летит флот
+            self._targets_with_fleets.add(best_target.id)
+            
             return Action(
                 playerId=self.player,
                 sourcePlanetId=best_source.id,
@@ -154,12 +181,10 @@ class RuleBasedAgent(PlanetWarsPlayer):
         if len(my_planets) < 2:
             return None
         
-        # Находим планету с максимальным количеством кораблей (тыловая)
         rear = max(my_planets, key=lambda p: p.n_ships)
         if rear.n_ships < 10:
             return None
         
-        # Находим фронтовую планету (ближайшую к врагу или с минимумом кораблей)
         front = min(my_planets, key=lambda p: p.n_ships)
         if front.id == rear.id:
             return None
@@ -179,4 +204,4 @@ class RuleBasedAgent(PlanetWarsPlayer):
         return math.sqrt((p1.position.x - p2.position.x)**2 + (p1.position.y - p2.position.y)**2)
     
     def get_agent_type(self) -> str:
-        return "Rule-Based Agent v1.0"
+        return "Rule-Based Agent v1.2"
