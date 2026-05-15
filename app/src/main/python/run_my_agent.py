@@ -6,29 +6,19 @@ from core.unified_game_runner import UnifiedGameRunner
 from agents.fully_observable_agent_adapter import as_unified
 from agents.random_agents import CarefulRandomAgent, PureRandomAgent
 from agents.greedy_heuristic_agent import GreedyHeuristicAgent
+from my_greedy_heuristic import MyGreedyHeuristicAgent
 from rule_based_agent import RuleBasedAgent
 
-# Все агенты для сравнения
 ALL_AGENTS = {
     "PureRandom": lambda: PureRandomAgent(),
     "CarefulRandom": lambda: CarefulRandomAgent(),
     "GreedyHeuristic": lambda: GreedyHeuristicAgent(),
+    "MyGreedy": lambda: MyGreedyHeuristicAgent(),
     "RuleBased": lambda: RuleBasedAgent(),
 }
 
-class DoNothingAgent:
-    """Агент, который ничего не делает."""
-    def prepare_to_play_as(self, player, params, opponent=None):
-        self.player = player
-        return "DoNothing"
-    def get_action(self, state):
-        return __import__('core.game_state', fromlist=['Action']).Action.do_nothing()
-    def get_agent_type(self):
-        return "DoNothing"
-
-def run_tournament(n_games: int = 20, checkpoint_path: str = None):
+def run_tournament(n_games: int = 20):
     params = GameParams(num_planets=20)
-    
     agents = list(ALL_AGENTS.keys())
     
     print(f"{'='*80}")
@@ -39,21 +29,18 @@ def run_tournament(n_games: int = 20, checkpoint_path: str = None):
     
     for i, name1 in enumerate(agents):
         for name2 in agents:
-            if name1 >= name2:  # Избегаем дубликатов и self-play
+            if name1 >= name2:
                 continue
             
             agent1 = ALL_AGENTS[name1]()
             agent2 = ALL_AGENTS[name2]()
             
-            # Адаптируем агентов для UnifiedGameRunner
-            if hasattr(agent1, 'get_action'):
-                a1 = as_unified(agent1) if not isinstance(agent1, DoNothingAgent) else agent1
-            if hasattr(agent2, 'get_action'):
-                a2 = as_unified(agent2) if not isinstance(agent2, DoNothingAgent) else agent2
-            
             print(f"{name1:20} vs {name2:20} ... ", end="", flush=True)
             
             try:
+                a1 = as_unified(agent1)
+                a2 = as_unified(agent2)
+                
                 runner = UnifiedGameRunner(a1, a2, params, partial_observability=False)
                 t0 = time.time()
                 scores = runner.run_games(n_games)
@@ -70,7 +57,6 @@ def run_tournament(n_games: int = 20, checkpoint_path: str = None):
                 print(f"ERROR: {e}")
                 results[(name1, name2)] = (0, 0, 0)
     
-    # Итоговая таблица
     print(f"\n{'='*80}")
     print("TOURNAMENT RESULTS")
     print(f"{'='*80}")
@@ -97,6 +83,5 @@ def run_tournament(n_games: int = 20, checkpoint_path: str = None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--games", type=int, default=20)
-    parser.add_argument("--checkpoint", type=str, default=None)
     args = parser.parse_args()
-    run_tournament(args.games, args.checkpoint)
+    run_tournament(args.games)
