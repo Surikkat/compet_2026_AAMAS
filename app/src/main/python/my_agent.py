@@ -10,7 +10,7 @@ class MyPythonAgent(PlanetWarsPlayer):
     def __init__(self, checkpoint_path: Optional[str] = None):
         super().__init__()
         
-        api_key = os.getenv("OPENROUTER_API_KEY")
+        api_key = os.getenv("OPENROUTER_API_KEY",)
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY not set")
         
