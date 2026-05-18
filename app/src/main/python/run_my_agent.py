@@ -6,15 +6,13 @@ from core.unified_game_runner import UnifiedGameRunner
 from agents.fully_observable_agent_adapter import as_unified
 from agents.random_agents import CarefulRandomAgent, PureRandomAgent
 from agents.greedy_heuristic_agent import GreedyHeuristicAgent
-from my_greedy_heuristic import MyGreedyHeuristicAgent
-from rule_based_agent import RuleBasedAgent
+from agents.my_greedy_heuristic import MyGreedyHeuristicAgent
 
 ALL_AGENTS = {
     "PureRandom": lambda: PureRandomAgent(),
     "CarefulRandom": lambda: CarefulRandomAgent(),
     "GreedyHeuristic": lambda: GreedyHeuristicAgent(),
     "MyGreedy": lambda: MyGreedyHeuristicAgent(),
-    "RuleBased": lambda: RuleBasedAgent(),
 }
 
 def run_tournament(n_games: int = 20):
